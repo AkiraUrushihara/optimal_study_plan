@@ -11,25 +11,25 @@ import json
 import csv
 import os
 from datetime import datetime
+# ------------------------------------------------------------------
+# プリセット: ここに直接値を設定してスクリプトを実行できます。
+# SUBJECT_PRESET: 科目名の文字列
+# DAY_CAPACITIES_PRESET: 各日の利用可能時間のリスト（時間単位）
+# COMMON_TIME_PER_ITEM_PRESET: すべてのタスクに共通の1問あたり所要時間（時間単位）
+# TASKS_PRESET: タスクのリスト。各タスクは辞書で、以下のキーを持ちます:
+#   - name: タスク名（文字列）
+#   - total: 問題数（整数）
+#   - priority: 優先度（整数、小さいほど高優先度）
+#   - difficulty: 難易度係数（浮動小数点数、1.0が標準）
 
-# --- オプション: ファイル内で値を定義して対話入力をスキップできます ---
-# 例:
-# SUBJECT_PRESET = "サーモ"
-# DAY_CAPACITIES_PRESET = [1.0, 0.5, 2.0]  # 各日ごとの利用可能時間
-# COMMON_TIME_PER_ITEM_PRESET = 0.5  # 全タスク共通の1問あたり時間
-# TASKS_PRESET = [
-#     {"name": "教科書問題", "total": 10, "priority": 1, "difficulty": 1.0},
-#     {"name": "過去問", "total": 5, "priority": 2, "difficulty": 1.2},
-# ]
-# デフォルトでは None。編集して値を入れると対話入力をスキップします。
-SUBJECT_PRESET = "サーモ"
+SUBJECT_PRESET = "例)数学"
 DAY_CAPACITIES_PRESET = [0.5,3.0,3.0,2.0,2.0,8.0,8.0]
 COMMON_TIME_PER_ITEM_PRESET = 0.5
 TASKS_PRESET = [
-    {"name": "演習プリント", "total": 8, "priority": 3, "difficulty": 1.0},
-    {"name": "授業プリント", "total": 4, "priority": 1, "difficulty": 2.0},
-    {"name": "教科書問題", "total": 27, "priority": 2, "difficulty": 1.0},
-    {"name": "過去問", "total": 2, "priority": 4, "difficulty": 4.0},
+    {"name": "例)演習プリント", "total": 8, "priority": 3, "difficulty": 1.0},
+    {"name": "例)授業プリント", "total": 4, "priority": 1, "difficulty": 2.0},
+    {"name": "例)教科書問題", "total": 27, "priority": 2, "difficulty": 1.0},
+    {"name": "例)過去問", "total": 2, "priority": 4, "difficulty": 4.0},
 ]
 # 日付関連のプリセット: Day1 の日付（ISO 形式 'YYYY-MM-DD'）とテスト日（任意、同じ形式）
 # ここに日付文字列を設定すると CSV に保存され、他ツールで利用できます。
