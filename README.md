@@ -1,27 +1,19 @@
 # 学習プランツール
 
-場所: `optimal_study_plan/src/plan_gui.py`
 
 ## 概要
 
-`plan_gui.py` は Tkinter ベースの簡易 GUI です。主な機能は以下です。
-
-- 新規の学習プランを作成して日別にタスクを割り当てる。
-- 既存の CSV プランを読み込み、「今日」を適用して完了数を反映し、残りを再計画する（リプラン）。
-- 生成／再計画したプランを CSV で保存する。
-
-本リポジトリは標準ライブラリのみで動作するように作られています。
+モデル予測制御から着想を得た学習プラン最適化ツールです。
 
 ## 前提／準備
 
 - Python 3.8 以上（推奨）。
-- 作業ディレクトリの例: `c:\Users\akira\personal-project\optimal_study_plan`。
-- GUI 実行に追加ライブラリは不要（Tkinter は標準で同梱されていることが多いです）。
 
 ## 起動方法（PowerShell）
 
-```powershell
-python "c:\Users\akira\personal-project\optimal_study_plan\src\plan_gui.py"
+```bash
+cd "your_directory"
+python "src\plan_gui.py"
 ```
 
 GUI が起動しない場合は、まず `python --version` を実行してインタプリタを確認してください。
@@ -109,49 +101,3 @@ GUI は多少のフォーマットゆらぎに寛容ですが、列順や見出�
 - `src/first_study_plan.py` : プリセット／割当ロジックの参照先
 - `src/done_task.py` : CLI ベースの再計画ユーティリティ（併用可能）
 - `plans/` : CSV の既定保存先（GUI 起動時に自動作成されます）
-
-## 今後の改善案（提案）
-
-1. タスクを行単位で編集できる表形式エディタを追加。
-2. GUI の表示を Treeview にして折りたたみ可能にする。
-3. 保存済み CSV の履歴管理と自動バックアップを追加。
-
----
-
-必要であれば、サンプル CSV（`plans/sample_plan.csv`）やクイックスタート短縮版 README を追加できます。どれを作りましょうか？
-# 学習プランツール
-
-場所: `optimal_study_plan/src/plan_gui.py`
-
-## 概要
-
-`plan_gui.py` は Tkinter ベースの簡易 GUI です。新規プランの生成と、既存の CSV プランを読み込んで「今日」を適用し再計画（リプラン）する機能を持ちます。出力は CSV で保存できます。
-
-## 準備
-
-
-## 起動方法 (PowerShell)
-
-```powershell
-python "c:\Users\akira\personal-project\optimal_study_plan\src\plan_gui.py"
-```
-
-## GUI の使い方（要点）
-
-### タブ: 新規プラン
-
-  - フィールド順: `名前,合計問題数,優先順位,問題コスト(倍率)`。
-
-### タブ: CSVから更新
-
-
-## CSV 形式（概要）
-
-
-## よくあるトラブルと対処
-
-
-## 次にできる改善（提案）
-
-
-もし README に追加したいスクリーンショットやサンプル CSV があれば貼ってください。必要なら README を英語版でも作成します。
