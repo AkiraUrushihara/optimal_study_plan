@@ -11,24 +11,24 @@ import json
 import csv
 import os
 from datetime import datetime
-# ------------------------------------------------------------------
-# プリセット: ここに直接値を設定してスクリプトを実行できます。
-# SUBJECT_PRESET: 科目名の文字列
-# DAY_CAPACITIES_PRESET: 各日の利用可能時間のリスト（時間単位）
-# COMMON_TIME_PER_ITEM_PRESET: すべてのタスクに共通の1問あたり所要時間（時間単位）
-# TASKS_PRESET: タスクのリスト。各タスクは辞書で、以下のキーを持ちます:
-#   - name: タスク名（文字列）
-#   - total: 問題数（整数）
-#   - priority: 優先度（整数、小さいほど高優先度）
-#   - difficulty: 難易度係数（浮動小数点数、1.0が標準）
 
+# --- オプション: ファイル内で値を定義して対話入力をスキップできます ---
+# 例:
+# SUBJECT_PRESET = "数学"
+# DAY_CAPACITIES_PRESET = [1.0, 0.5, 2.0]  # 各日ごとの利用可能時間
+# COMMON_TIME_PER_ITEM_PRESET = 0.5  # 全タスク共通の1問あたり時間
+# TASKS_PRESET = [
+#     {"name": "教科書問題", "total": 10, "priority": 1, "difficulty": 1.0},
+#     {"name": "過去問", "total": 5, "priority": 2, "difficulty": 1.2},
+# ]
+# デフォルトでは None。編集して値を入れると対話入力をスキップします。
 SUBJECT_PRESET = "例)数学"
-DAY_CAPACITIES_PRESET = [0.5,3.0,3.0,2.0,2.0,8.0,8.0]
+DAY_CAPACITIES_PRESET = [2.0,3.0,3.0,3.0,3.0,8.0,8.0]
 COMMON_TIME_PER_ITEM_PRESET = 0.5
 TASKS_PRESET = [
-    {"name": "例)演習プリント", "total": 8, "priority": 3, "difficulty": 1.0},
-    {"name": "例)授業プリント", "total": 4, "priority": 1, "difficulty": 2.0},
-    {"name": "例)教科書問題", "total": 27, "priority": 2, "difficulty": 1.0},
+    {"name": "例)演習プリント", "total": 8, "priority": 2, "difficulty": 1.0},
+    {"name": "例)授業プリント", "total": 4, "priority": 3, "difficulty": 3.0},
+    {"name": "例)教科書問題", "total": 27, "priority": 1, "difficulty": 1.0},
     {"name": "例)過去問", "total": 2, "priority": 4, "difficulty": 4.0},
 ]
 # 日付関連のプリセット: Day1 の日付（ISO 形式 'YYYY-MM-DD'）とテスト日（任意、同じ形式）
@@ -93,40 +93,71 @@ def compute_total_time(tasks):
 
 
 def allocate_by_priority(day_capacities, tasks):
-    # 各日の割当をリストで返す。tasksは優先度でソートする（昇順）
-    tasks_sorted = sorted(tasks, key=lambda x: x["priority"])
+    # 日ごとに埋めていく方式：各日について利用可能時間を使い切るよう
+    # 優先度順（数値が小さいほど高優先度と扱う）にタスクを割り当てます。
+    # 同一優先度内では残数が多いものを先に割り当てることで、重要な大きなタスク
+    # を前倒しで処理しやすくします。
     days = len(day_capacities)
-    plan = [ [] for _ in range(days) ]
+    plan = [[] for _ in range(days)]
 
+    # 各日を先頭から処理していく
     for day in range(days):
-        remaining_time = day_capacities[day]
-        any_assigned = False
-        # 高優先度から順に割り当て
-        for t in tasks_sorted:
-            if t["remaining"] <= 0:
-                continue
-            time_per = t["time_per_item"] * t["difficulty"]
-            if time_per <= 0:
-                continue
-            max_items = int(floor(remaining_time / time_per)) if remaining_time > 0 else 0
-            if max_items > 0:
-                assign = min(max_items, t["remaining"])
-            else:
-                # 1日の残時間がある（0時間ではない）場合は、たとえ1問に必要な時間を
-                # 超えてしまっても1問はこなす（0時間以外は一日に1問ルール）
-                if remaining_time > 0 and t["remaining"] > 0 and not any_assigned:
-                    assign = 1
-                else:
+        remaining_time = float(day_capacities[day])
+        any_assigned_today = False
+
+        # その日の割当ループ：毎パスで優先度順に並べ替えて割当を試みる
+        while True:
+            assigned_in_pass = False
+
+            # 優先度（小さい値が高優先度）→ 残数（大きいもの優先）の順でソート
+            tasks_sorted = sorted(tasks, key=lambda x: (x.get("priority", 99), -int(x.get("remaining", 0))))
+
+            for t in tasks_sorted:
+                if t.get("remaining", 0) <= 0:
                     continue
-            t["remaining"] -= assign
-            remaining_time -= assign * time_per
-            if assign > 0:
-                any_assigned = True
-                plan[day].append({
-                    "name": t["name"],
-                    "assigned": assign,
-                    "time": assign * time_per,
-                })
+                time_per = t.get("time_per_item", 0) * t.get("difficulty", 1.0)
+                if time_per <= 0:
+                    # 所要時間が不正ならスキップ
+                    continue
+
+                # その日の残時間に何問入るか
+                if remaining_time >= time_per:
+                    max_items = int(floor(remaining_time / time_per))
+                    assign = min(max_items, t["remaining"])
+                    if assign <= 0:
+                        continue
+                    # 割当
+                    t["remaining"] -= assign
+                    remaining_time -= assign * time_per
+                    plan[day].append({"name": t["name"], "assigned": assign, "time": assign * time_per})
+                    assigned_in_pass = True
+                    any_assigned_today = True
+                # 余裕がない場合は次のタスクを試す
+
+            # パスで何も割り当てられなかった場合、
+            # まだタスクが残っていれば "最低1問" ルールで1問を割り当てる
+            if not assigned_in_pass:
+                # まだ割当が1件も無く、日として多少の時間がある場合は1問だけ割当
+                if (not any_assigned_today) and remaining_time > 0:
+                    # 同様に優先度順で1問だけ割当
+                    tasks_sorted = sorted(tasks, key=lambda x: (x.get("priority", 99), -int(x.get("remaining", 0))))
+                    for t in tasks_sorted:
+                        if t.get("remaining", 0) <= 0:
+                            continue
+                        time_per = t.get("time_per_item", 0) * t.get("difficulty", 1.0)
+                        if time_per <= 0:
+                            continue
+                        # 1問割り当て（残時間が足りなくても強制割当）
+                        t["remaining"] -= 1
+                        remaining_time -= time_per
+                        plan[day].append({"name": t["name"], "assigned": 1, "time": time_per})
+                        any_assigned_today = True
+                        assigned_in_pass = True
+                        break
+
+            # もう割当できるものが無ければこの日の処理を終える
+            if not assigned_in_pass:
+                break
 
     return plan
 
@@ -153,7 +184,8 @@ def print_plan(subject, total_available, day_capacities, tasks, total_needed, pl
     for i, day_tasks in enumerate(plan, start=1):
         print(f"Day {i}:")
         if not day_tasks:
-            print("  休憩/学習無し")
+            # 空日はプレースホルダを出さず、タスク行を出力しない
+            pass
         else:
             for it in day_tasks:
                 print(f"  - {it['name']} を {it['assigned']} 問（合計 {it['time']:.2f} 時間）")
@@ -219,7 +251,8 @@ def _export_plan_csv(path, subject, day_capacities, tasks, total_needed, plan):
         writer.writerow(["Day", "Task", "Assigned", "Time(hours)"])
         for i, day_tasks in enumerate(plan, start=1):
             if not day_tasks:
-                writer.writerow([i, "(休憩/学習無し)", "", ""])
+                # 以前は空日の行でプレースホルダを書いていたが、現在はタスク名を空文字で出力する
+                writer.writerow([i, "", "", ""])
             else:
                 for it in day_tasks:
                     writer.writerow([i, it["name"], it["assigned"], f"{it['time']:.2f}"])
@@ -249,7 +282,8 @@ def _export_plan_txt(path, subject, day_capacities, tasks, total_needed, plan):
     for i, day_tasks in enumerate(plan, start=1):
         lines.append(f"Day {i}:")
         if not day_tasks:
-            lines.append("  休憩/学習無し")
+            # 空日の表示はプレースホルダを出さず、タスク行を出力しない
+            pass
         else:
             for it in day_tasks:
                 lines.append(f"  - {it['name']} を {it['assigned']} 問（合計 {it['time']:.2f} 時間）")

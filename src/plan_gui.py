@@ -164,6 +164,26 @@ class PlannerGUI(tk.Tk):
             messagebox.showerror('エラー', '割当関数が見つかりません')
             return
 
+        # 割り当て後、残タスクがある場合は警告を出す
+        total_assigned = {}
+        for day_tasks in plan:
+            for task in day_tasks:
+                task_name = task['name']
+                total_assigned[task_name] = total_assigned.get(task_name, 0) + task['assigned']
+        
+        unfinished_tasks = []
+        for t in tasks:
+            assigned_count = total_assigned.get(t['name'], 0)
+            if assigned_count < t['total']:
+                remaining_count = t['total'] - assigned_count
+                unfinished_tasks.append(f"  {t['name']}: {remaining_count}問が未割当")
+        
+        if unfinished_tasks:
+            warning_msg = "⚠️ 警告: 時間内にすべてのタスクを割り当てられませんでした。\n\n"
+            warning_msg += "未割当のタスク:\n" + '\n'.join(unfinished_tasks)
+            warning_msg += "\n\n各日の勉強時間を増やすか、タスクの優先度・難易度を調整してください。"
+            messagebox.showwarning('時間不足', warning_msg)
+
         # show
         self.txt_out.delete('1.0','end')
         self.txt_out.insert('end', f"科目: {subject}\n開始: {start_date}\nテスト: {test_date}\n\n")
@@ -183,7 +203,8 @@ class PlannerGUI(tk.Tk):
                     pass
             self.txt_out.insert('end', f"{label}:\n")
             if not day_tasks:
-                self.txt_out.insert('end', '  休憩/学習無し\n')
+                # 空日の表示では「休憩」のプレースホルダを出さず、何も書かない
+                pass
             else:
                 for it in day_tasks:
                     self.txt_out.insert('end', f"  - {it['name']} を {it['assigned']} 問 合計 {it['time']:.2f} 時間\n")
@@ -219,7 +240,8 @@ class PlannerGUI(tk.Tk):
             writer.writerow(['Day','Task','Assigned','Time(hours)'])
             for i, day_tasks in enumerate(plan, start=1):
                 if not day_tasks:
-                    writer.writerow([i, '(休憩/学習無し)','', ''])
+                    # 割当がない日はタスク名を空文字で CSV に出力する
+                    writer.writerow([i, '', '', ''])
                 else:
                     for it in day_tasks:
                         writer.writerow([i, it['name'], it['assigned'], f"{it['time']:.2f}"])
@@ -231,10 +253,10 @@ class PlannerGUI(tk.Tk):
         top = ttk.Frame(frm)
         top.pack(fill='x', padx=8, pady=8)
         ttk.Button(top, text='CSV読み込み', command=self._load_csv_for_update).pack(side='left')
-        ttk.Label(top, text='今日 (Day#)').pack(side='left', padx=6)
+        ttk.Label(top, text='完了した日 (Day#)').pack(side='left', padx=6)
         self.entry_today = ttk.Entry(top, width=6)
         self.entry_today.pack(side='left')
-        ttk.Button(top, text='今日を適用して再計画', command=self._apply_today_replan).pack(side='left', padx=6)
+        ttk.Button(top, text='完了を適用して再計画', command=self._apply_today_replan).pack(side='left', padx=6)
 
         self.txt_update = scrolledtext.ScrolledText(frm)
         self.txt_update.pack(fill='both', expand=True, padx=8, pady=8)
@@ -265,10 +287,23 @@ class PlannerGUI(tk.Tk):
             day_caps=[]
             if i < len(rows) and rows[i] and rows[i][0].strip()=='Day Capacities':
                 i+=2
+                # 同様に Day 列は絶対番号の可能性があるため辞書経由で整形する
+                tmp = {}
+                max_day = 0
                 while i < len(rows) and rows[i]:
-                    try: day_caps.append(float(rows[i][1]))
-                    except: pass
+                    try:
+                        dn = int(rows[i][0])
+                        h = float(rows[i][1])
+                        tmp[dn] = h
+                        if dn > max_day: max_day = dn
+                    except Exception:
+                        pass
                     i+=1
+                if max_day > 0:
+                    day_caps = [0.0] * max_day
+                    for dn, h in tmp.items():
+                        if 1 <= dn <= max_day:
+                            day_caps[dn-1] = h
             while i < len(rows) and not rows[i]: i+=1
             plan_rows=[]
             if i < len(rows) and rows[i] and rows[i][0].strip()=='Plan':
@@ -289,13 +324,32 @@ class PlannerGUI(tk.Tk):
 
         self.loaded_meta = plan_data['meta']
         self.loaded_plan_rows = plan_data['plan_rows']
+        # store day capacities as well for later saving/再計画保存時に利用
+        self.loaded_day_caps = plan_data.get('day_capacities', [])
         # print summary
         self.txt_update.delete('1.0','end')
         self.txt_update.insert('end', f"読み込み: {os.path.basename(fpath)}\nメタ情報: {self.loaded_meta}\n\n")
-        # list tasks
+        
+        # 読み込まれた全データをDay別に表示
+        days_data = {}
+        for r in self.loaded_plan_rows:
+            if not str(r.get('name','')).strip(): continue
+            day = r.get('day', 0)
+            if day not in days_data:
+                days_data[day] = []
+            days_data[day].append(f"{r['name']} {r['assigned']}問")
+        
+        self.txt_update.insert('end', "読み込まれたデータ（Day別）:\n")
+        for day in sorted(days_data.keys()):
+            tasks_str = ', '.join(days_data[day])
+            self.txt_update.insert('end', f"  Day {day}: {tasks_str}\n")
+        self.txt_update.insert('end', "\n")
+        
+        # タスク一覧を作る
         tasks_info = {}
         for r in self.loaded_plan_rows:
-            if r['name']=='(休憩/学習無し)': continue
+            # 空文字のタスク名行は集計対象外
+            if not str(r.get('name','')).strip(): continue
             if r['name'] not in tasks_info: tasks_info[r['name']]={'total':0,'today':0,'prev':0}
             tasks_info[r['name']]['total'] += r['assigned']
         for name,info in tasks_info.items():
@@ -312,42 +366,130 @@ class PlannerGUI(tk.Tk):
         # aggregate tasks
         tasks = {}
         for r in self.loaded_plan_rows:
-            if r['name']=='(休憩/学習無し)': continue
-            info = tasks.setdefault(r['name'], {'total_assigned':0, 'time_per_item_samples':[], 'first_day':r['day']})
+            # 空文字のタスク名行は集計対象外
+            raw_name = r.get('name', '')
+            if not str(raw_name).strip(): continue
+            # タスク名を正規化してキーとして使う（空白を統一）
+            n_key = str(raw_name).strip()
+            info = tasks.setdefault(n_key, {'total_assigned':0, 'time_per_item_samples':[], 'first_day':r['day']})
             info['total_assigned'] += r['assigned']
             if r['assigned']>0:
                 info['time_per_item_samples'].append(r['time']/r['assigned'] if r['assigned'] else 0)
             info['first_day'] = min(info['first_day'], r['day'])
 
         # prompt user for done_today values via simple dialog loop
+        # ダイアログの提示順を安定させるため、明示的に優先度（first_day）→名前順でソートして表示する
+        ordered = sorted(tasks.items(), key=lambda kv: (kv[1].get('first_day', 0), kv[0]))
         done_today = {}
-        for name,info in tasks.items():
-            prev = sum(r['assigned'] for r in self.loaded_plan_rows if r['name']==name and r['day']<today)
-            today_assigned = sum(r['assigned'] for r in self.loaded_plan_rows if r['name']==name and r['day']==today)
-            suggested = min(info['total_assigned'] - prev, today_assigned)
-            s = tk.simpledialog.askstring('完了数入力', f"{name}: 今日割当={today_assigned}, 過去割当合計={prev}, 合計予定={info['total_assigned']} -> 今日完了数 (デフォルト {suggested}): ")
-            if s is None or s.strip()=='' : done = suggested
+        for name, info in ordered:
+            # name は既に正規化済み（tasks 辞書作成時に strip 済み）
+            prev = sum(int(r.get('assigned', 0)) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and int(r.get('day', 0)) < today)
+            today_assigned = sum(int(r.get('assigned', 0)) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and int(r.get('day', 0)) == today)
+            future_assigned = sum(int(r.get('assigned', 0)) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and int(r.get('day', 0)) > today)
+            
+            # デフォルトは今日の計画数（全部やった想定）
+            suggested = today_assigned
+            if suggested < 0:
+                suggested = 0
+            
+            # プロンプトメッセージ
+            if today_assigned > 0:
+                prompt = f"{name}: Day {today}の計画={today_assigned}問 -> 実際に完了した数 (デフォルト {suggested}): "
             else:
-                try: done=int(s)
-                except: done=0
-            done_today[name]=done
+                # 計画外のタスク（今日の計画=0だが、全体には存在する）
+                prompt = f"{name}: Day {today}の計画=0問（計画外）-> 実際に完了した数があれば入力 (デフォルト 0): "
+            
+            s = tk.simpledialog.askstring('完了数入力', prompt)
+            if s is None or s.strip() == '':
+                done = int(suggested)
+            else:
+                try:
+                    done = int(s.strip())
+                except Exception:
+                    done = 0
+            
+            # 入力値のバリデーション: 0以上、全体の残り数以下
+            total_remaining = info['total_assigned'] - prev
+            if done < 0:
+                done = 0
+            if done > total_remaining:
+                # 入力が残り総数より大きい場合は警告して上限に合わせる
+                messagebox.showwarning('入力エラー', f'{name}の完了数が残り総数({total_remaining}問)を超えています。{total_remaining}問に調整します。')
+                done = total_remaining
+            
+            # done_today のキーとして正規化済みの name を使う
+            done_today[name] = done
 
-        # build remaining tasks
+        # デバッグ出力は next_caps（再計画ウィンドウ）が分かってから出力するため、ここでは出さない
+
+        # 次の日の利用可能時間を入力してもらう（1日分のみ）
+        # それ以降の日は元CSVの day_capacities を使用
+        s = tk.simpledialog.askstring('次の日入力', f'次の日（Day {today+1}）の利用可能時間を入力してください（例:3）:')
+        if s is None: return
+        try:
+            next_day_cap = float(s.strip())
+        except Exception:
+            messagebox.showwarning('警告', f'数値を入力してください。入力値: "{s}"')
+            return
+        
+        # 元CSVの day_capacities から次の日以降を取得
+        orig_caps = getattr(self, 'loaded_day_caps', []) or []
+        # next_caps = [次の日の入力値] + [元CSVの残りの日]
+        next_caps = [next_day_cap]
+        if today < len(orig_caps):
+            # 元CSVの today+1 以降の容量を追加
+            next_caps.extend(orig_caps[today+1:])
+        
+        self.txt_update.insert('end', f"[入力確認] 次の日（Day {today+1}）: {next_day_cap} 時間\n")
+        self.txt_update.insert('end', f"[再計画範囲] Day {today+1}～{today+len(next_caps)}: {next_caps}\n\n")
+
+        # cutoff_day を確定（today の次の日から next_caps の期間を再計画）
+        cutoff_day = today + len(next_caps)
+
+        # --- デバッグ出力: ユーザー入力とウィンドウ内の差分を表示して確認できるようにする ---
+        debug_lines = [f"デバッグ: today={today}, cutoff_day={cutoff_day}, next_caps長={len(next_caps)}"]
+        debug_lines.append("完了数サマリ（タスク名 / 過去+今日の割当 / 今日の計画 / 入力完了 / 未来の割当 / 残り）:")
+        for name, info in ordered:
+            # name は既に正規化済み
+            # 過去+今日: today 以前（today を含む）- これらは固定
+            past_and_today_rows = [(r.get('day'), r.get('assigned')) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and int(r.get('day', 0)) <= today]
+            past_and_today = sum(int(assigned) for day, assigned in past_and_today_rows)
+            # 今日の計画: today の割当
+            today_plan = sum(int(r.get('assigned', 0)) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and int(r.get('day', 0)) == today)
+            # 再計画ウィンドウ（未来）: today より後から cutoff_day まで
+            future_rows = [(r.get('day'), r.get('assigned')) for r in self.loaded_plan_rows if str(r.get('name', '')).strip() == name and today < int(r.get('day', 0)) <= cutoff_day]
+            future_plan = sum(int(assigned) for day, assigned in future_rows)
+            done = done_today.get(name, 0)  # 正規化済みキーで取得
+            # 残り計算: (今日の計画 + 未来) - 今日の完了
+            # 計画外完了の場合、未来から差し引く
+            rem = today_plan + future_plan - done
+            if rem < 0: rem = 0
+            today_remaining = max(0, today_plan - done)
+            # 計画外完了の検出
+            extra_msg = ""
+            if done > today_plan:
+                extra_msg = f" [計画外+{done - today_plan}]"
+            debug_lines.append(f"  {name} / 過去+今日={past_and_today} / 今日計画={today_plan} / 入力完了={done}{extra_msg} / 今日残り={today_remaining} / 未来={future_plan} / 残り合計={rem}")
+        # GUI の出力欄に表示
+        self.txt_update.insert('end', '\n'.join(debug_lines) + '\n\n')
+
+        # build remaining tasks: (今日の計画 + 未来の割当) - 完了数 を再計画する
+        # ユーザーが入力した今日の完了数を差し引く。これにより、完了数は入力したタスク内でのみ反映され、
+        # 他タスクへ影響が出ないようにする。計画外完了の場合、未来の割当から差し引く。
         remaining_tasks=[]
         for name,info in tasks.items():
-            prev = sum(r['assigned'] for r in self.loaded_plan_rows if r['name']==name and r['day']<today)
-            rem = info['total_assigned'] - prev - done_today.get(name,0)
+            # name は既に正規化済み（tasks 辞書作成時に strip 済み）
+            # 今日の計画: today の割当
+            today_plan = sum(r['assigned'] for r in self.loaded_plan_rows if str(r.get('name','')).strip()==name and r['day']==today)
+            # 未来の割当: today より後
+            future_plan = sum(r['assigned'] for r in self.loaded_plan_rows if str(r.get('name','')).strip()==name and today < r['day'] <= cutoff_day)
+            # ユーザー入力分はそのタスク内で差し引く（正規化済みキーで取得）
+            done = done_today.get(name, 0)
+            # 残り = (今日の計画 + 未来の割当) - 完了数
+            rem = today_plan + future_plan - done
             if rem < 0: rem = 0
             tpi = (sum(info['time_per_item_samples'])/len(info['time_per_item_samples'])) if info['time_per_item_samples'] else 1.0
             remaining_tasks.append({'name':name,'remaining':int(rem),'time_per_item':float(tpi),'difficulty':1.0,'priority':int(info['first_day'])})
-
-        # next days capacities: ask user
-        s = tk.simpledialog.askstring('次の日入力', '次の日の利用可能時間をカンマ区切りで入力してください（例:2,3,2）:')
-        if s is None: return
-        next_caps = []
-        for part in s.split(','):
-            try: next_caps.append(float(part.strip()))
-            except: pass
 
         # allocate using first_mod.allocate_by_priority
         tasks_alloc = []
@@ -359,10 +501,32 @@ class PlannerGUI(tk.Tk):
             messagebox.showerror('エラー','割当関数が見つかりません')
             return
 
+        # 割り当て後、残タスクがある場合は警告を出す
+        total_assigned = {}
+        for day_tasks in plan:
+            for task in day_tasks:
+                task_name = task['name']
+                total_assigned[task_name] = total_assigned.get(task_name, 0) + task['assigned']
+        
+        unfinished_tasks = []
+        for t in tasks_alloc:
+            assigned_count = total_assigned.get(t['name'], 0)
+            if assigned_count < t['remaining']:
+                remaining_count = t['remaining'] - assigned_count
+                unfinished_tasks.append(f"  {t['name']}: {remaining_count}問が未割当")
+        
+        if unfinished_tasks:
+            warning_msg = "⚠️ 警告: 時間内にすべてのタスクを割り当てられませんでした。\n\n"
+            warning_msg += "未割当のタスク:\n" + '\n'.join(unfinished_tasks)
+            warning_msg += "\n\n各日の勉強時間を増やすか、タスクの優先度・難易度を調整してください。"
+            self.txt_update.insert('end', '\n' + warning_msg + '\n\n')
+            messagebox.showwarning('時間不足', warning_msg)
+
         # render replan + remaining original future days in calendar view
         try:
             if self.loaded_meta.get('start_date'):
                 base_date = datetime.fromisoformat(self.loaded_meta.get('start_date')).date()
+                # 再計画は today の次の日から始まる（today は完了済み）
                 start_day = today + 1
                 new_start = (base_date + timedelta(days=(today))).isoformat()
             else:
@@ -391,7 +555,8 @@ class PlannerGUI(tk.Tk):
         if future_days_map:
             for daynum in range(cutoff_day+1, max_future_day+1):
                 day_tasks = future_days_map.get(daynum, [])
-                filtered = [t for t in day_tasks if t.get('name') and t.get('name') != '(休憩/学習無し)']
+                # 空のタスク名（以前の '(休憩/学習無し)' を含む）を除外する
+                filtered = [t for t in day_tasks if t.get('name') and t.get('name').strip() != '']
                 if filtered:
                     conv = [{'name': t['name'], 'assigned': t['assigned'], 'time': t['time']} for t in filtered]
                 else:
@@ -404,8 +569,8 @@ class PlannerGUI(tk.Tk):
             combined_plan.extend(future_plan)
 
         # print combined plan in original (per-day) format
-        self.txt_update.delete('1.0','end')
-        self.txt_update.insert('end', f"再計画（開始 Day {start_day}）:\n\n")
+        # デバッグサマリは既に表示済みなので、削除せずに追記する
+        self.txt_update.insert('end', f"\n再計画（開始 Day {start_day}）:\n\n")
         # base date for label calculation
         base_for_print = None
         if new_start:
@@ -423,7 +588,8 @@ class PlannerGUI(tk.Tk):
                     pass
             self.txt_update.insert('end', f"{label}:\n")
             if not day_tasks:
-                self.txt_update.insert('end','  休憩/学習無し\n')
+                # 空日はプレースホルダを出さない
+                pass
             else:
                 for it in day_tasks:
                     self.txt_update.insert('end', f"  - {it['name']} を {it['assigned']} 問 合計 {it['time']:.2f} 時間\n")
@@ -435,34 +601,94 @@ class PlannerGUI(tk.Tk):
             if fname:
                 with open(fname,'w',newline='',encoding='utf-8') as f:
                     w = csv.writer(f)
+                    # header meta
                     w.writerow(['subject', self.loaded_meta.get('subject','(無題)')])
                     w.writerow(['generated_at', datetime.now().isoformat()])
-                    w.writerow(['total_available', f"{sum(next_caps):.2f}"])
-                    total_needed = sum(t['remaining']*t['time_per_item'] for t in remaining_tasks)
-                    w.writerow(['total_needed', f"{total_needed:.2f}"])
-                    # start_date for replan
+
+                    # Build full day capacities array: ensure we include original loaded days and any new days from combined_plan
+                    orig_caps = getattr(self, 'loaded_day_caps', []) or []
+                    combined_len = start_day + len(combined_plan) - 1
+                    total_days = max(len(orig_caps), combined_len)
+                    full_day_caps = [0.0] * total_days
+                    for idx in range(total_days):
+                        if idx < len(orig_caps):
+                            full_day_caps[idx] = orig_caps[idx]
+                        else:
+                            full_day_caps[idx] = 0.0
+
+                    total_available = sum(full_day_caps)
+                    # total_needed: sum of hours in the combined_plan
+                    combined_total_time = 0.0
+                    for day_tasks in combined_plan:
+                        for it in day_tasks:
+                            combined_total_time += float(it.get('time', 0.0))
+
+                    w.writerow(['total_available', f"{total_available:.2f}"])
+                    w.writerow(['total_needed', f"{combined_total_time:.2f}"])
+
+                    # preserve start_date/test_date if present; update start_date to the original start if available
                     try:
                         if self.loaded_meta.get('start_date'):
-                            new_start = datetime.fromisoformat(self.loaded_meta.get('start_date')).date() + timedelta(days=(today))
-                            w.writerow(['start_date', new_start.isoformat()])
+                            # keep original start_date
+                            w.writerow(['start_date', self.loaded_meta.get('start_date')])
                     except Exception:
                         pass
                     if self.loaded_meta.get('test_date'):
                         w.writerow(['test_date', self.loaded_meta.get('test_date')])
+
                     w.writerow([])
                     w.writerow(['Day Capacities'])
                     w.writerow(['Day','AvailableHours'])
-                    for i,h in enumerate(next_caps, start= start_day):
+                    for i, h in enumerate(full_day_caps, start=1):
                         w.writerow([i, f"{h:.2f}"])
+
+                    # Plan: write rows for day=1..total_days, combining past original rows and new combined_plan
                     w.writerow([])
                     w.writerow(['Plan'])
                     w.writerow(['Day','Task','Assigned','Time(hours)'])
-                    for i, day_tasks in enumerate(plan, start=start_day):
-                        if not day_tasks:
-                            w.writerow([i,'(休憩/学習無し)','',''])
+
+                    # Build map of original plan rows by day
+                    orig_map = {}
+                    for r in self.loaded_plan_rows:
+                        try:
+                            d = int(r.get('day', 0))
+                        except Exception:
+                            continue
+                        orig_map.setdefault(d, []).append(r)
+
+                    for day in range(1, total_days+1):
+                        if day <= today:
+                            # past days and today (completed): write original rows (if any)
+                            rows = orig_map.get(day, [])
+                            if not rows:
+                                w.writerow([day, '', '', ''])
+                            else:
+                                for rr in rows:
+                                    name = rr.get('name','') or ''
+                                    assigned = int(rr.get('assigned',0)) if rr.get('assigned', '')!='' else ''
+                                    timeh = float(rr.get('time',0.0)) if rr.get('time', '')!='' else ''
+                                    w.writerow([day, name, assigned, f"{timeh:.2f}" if timeh!='' else ''])
                         else:
-                            for it in day_tasks:
-                                w.writerow([i,it['name'],it['assigned'],f"{it['time']:.2f}"])
+                            # future/replanned days (after today)
+                            if start_day <= day < start_day + len(combined_plan):
+                                rel = day - start_day
+                                day_tasks = combined_plan[rel]
+                                if not day_tasks:
+                                    w.writerow([day, '', '', ''])
+                                else:
+                                    for it in day_tasks:
+                                        w.writerow([day, it.get('name',''), it.get('assigned',0), f"{it.get('time',0.0):.2f}"])
+                            else:
+                                # if original had tasks for this day, write them; otherwise empty
+                                rows = orig_map.get(day, [])
+                                if not rows:
+                                    w.writerow([day, '', '', ''])
+                                else:
+                                    for rr in rows:
+                                        name = rr.get('name','') or ''
+                                        assigned = int(rr.get('assigned',0)) if rr.get('assigned', '')!='' else ''
+                                        timeh = float(rr.get('time',0.0)) if rr.get('time', '')!='' else ''
+                                        w.writerow([day, name, assigned, f"{timeh:.2f}" if timeh!='' else ''])
                 messagebox.showinfo('保存完了', f'プランを保存しました: {fname}')
 
 

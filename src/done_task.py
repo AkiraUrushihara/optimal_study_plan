@@ -63,13 +63,27 @@ def load_plan_csv(path: str) -> Dict[str, Any]:
         i += 1  # ヘッダ行
         # 次行は列名 "Day", "AvailableHours"
         i += 1
+        # CSV の Day 列は絶対番号になっている場合があるため、一旦辞書に格納してから
+        # 1..max_day までの配列に整形する。
+        tmp = {}
+        max_day = 0
         while i < len(rows) and rows[i]:
             r = rows[i]
             try:
-                day_capacities.append(float(r[1]))
+                day_num = int(r[0])
+                hours = float(r[1])
+                tmp[day_num] = hours
+                if day_num > max_day:
+                    max_day = day_num
             except Exception:
                 pass
             i += 1
+        if max_day > 0:
+            # 1..max_day の長さのリストを作り、未指定日は 0.0 を入れる
+            day_capacities = [0.0] * max_day
+            for dn, h in tmp.items():
+                if 1 <= dn <= max_day:
+                    day_capacities[dn - 1] = h
 
     # 空行を飛ばす
     while i < len(rows) and not rows[i]:
@@ -112,7 +126,8 @@ def aggregate_tasks_from_plan(plan_rows: List[Dict[str, Any]]) -> Dict[str, Dict
     tasks = {}
     for r in plan_rows:
         name = r["name"]
-        if name == '(休憩/学習無し)':
+        # 空文字（以前は '(休憩/学習無し)' を使っていたケースもある）をスキップする
+        if not str(name).strip():
             continue
         assigned = int(r.get("assigned", 0))
         time_h = float(r.get("time", 0.0))
@@ -318,8 +333,10 @@ def run():
                     rem = f"　テストまで残り{days_left}日"
                 label = f"{label} ({date_str}{rem})"
             print(f"{label}:")
+            # For days without assignments, do not print a "rest" placeholder.
             if not day_tasks:
-                print("  休憩/学習無し")
+                # leave the day header but no task lines
+                pass
             else:
                 for it in day_tasks:
                     print(f"  - {it['name']} を {it['assigned']} 問（合計 {it['time']:.2f} 時間）")
@@ -375,7 +392,8 @@ def run():
             writer.writerow(["Day", "Task", "Assigned", "Time(hours)"])
             for i, day_tasks in enumerate(plan, start=0):
                 if not day_tasks:
-                    writer.writerow([start_day + i, "(休憩/学習無し)", "", ""])
+                    # 割当がない日の CSV 行ではタスク名を空文字で出力する
+                    writer.writerow([start_day + i, "", "", ""])
                 else:
                     for it in day_tasks:
                         writer.writerow([start_day + i, it["name"], it["assigned"], f"{it['time']:.2f}"])
